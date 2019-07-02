@@ -123,6 +123,13 @@ public protocol PlayerPlaybackDelegate: AnyObject {
     func playerPlaybackWillLoop(_ player: Player)
 }
 
+private struct PlayerIcons {
+    var play: UIImage?
+    var pause: UIImage?
+    var rewind: UIImage?
+    var fastForward: UIImage?
+}
+
 // MARK: - Player
 
 /// ▶️ Player, simple way to play and stream media
@@ -341,8 +348,15 @@ open class Player: UIViewController {
     // Boolean that determines if the user or calling coded has trigged autoplay manually.
     internal var _hasAutoplayActivated: Bool = true
 
+    private var containerView: UIView = UIView()
+    private var icons: PlayerIcons?
+    private var controlButton: UIButton = UIButton(type: .system)
+    public var videoSlider: UISlider!// UISlider()
+    public var startTimeLabel: UILabel = UILabel()
+    public var endTimeLabel: UILabel = UILabel()
+    
     // MARK: - object lifecycle
-
+    
     public convenience init() {
         self.init(nibName: nil, bundle: nil)
     }
@@ -378,6 +392,11 @@ open class Player: UIViewController {
         super.loadView()
         self._playerView.frame = self.view.bounds
         self.view = self._playerView
+        
+        self.containerView.frame = self.view.frame
+        containerView.backgroundColor = UIColor(white: 0, alpha: 0.5)
+        view.addSubview(containerView)
+        containerView.isHidden = true
     }
 
     open override func viewDidLoad() {
@@ -407,6 +426,10 @@ open class Player: UIViewController {
 
 extension Player {
 
+    open func didGetTouchEvent() {
+        containerView.isHidden = !containerView.isHidden
+    }
+    
     /// Begins playback of the media from the beginning.
     open func playFromBeginning() {
         self.playbackDelegate?.playerPlaybackWillStartFromBeginning(self)
@@ -421,6 +444,7 @@ extension Player {
             self._hasAutoplayActivated = true
         }
         self.play()
+        controlButton.setImage(icons?.pause, for: .normal)
     }
 
     fileprivate func play() {
@@ -428,6 +452,7 @@ extension Player {
             self.playbackState = .playing
             self._avplayer.play()
         }
+        controlButton.setImage(icons?.pause, for: .normal)
     }
 
     /// Pauses playback of the media.
@@ -438,6 +463,7 @@ extension Player {
 
         self._avplayer.pause()
         self.playbackState = .paused
+        controlButton.setImage(icons?.play, for: .normal)
     }
 
     /// Stops playback of the media.
@@ -449,6 +475,7 @@ extension Player {
         self._avplayer.pause()
         self.playbackState = .stopped
         self.playbackDelegate?.playerPlaybackDidEnd(self)
+        controlButton.setImage(icons?.play, for: .normal)
     }
 
     /// Updates playback to the specified time.
@@ -585,6 +612,134 @@ extension Player {
                 self.setupPlayerItem(playerItem)
             }
         })
+    }
+    
+    func setupIcons(play: UIImage?,
+                    pause: UIImage?,
+                    rewind: UIImage?,
+                    fastForward: UIImage?) {
+        
+        icons = PlayerIcons(play: play, pause: pause, rewind: rewind, fastForward: fastForward)
+        
+        let size = CGSize(width: 50, height: 50)
+        controlButton.frame = CGRect(x: containerView.center.x - size.width / 2,
+                                     y: containerView.center.y - size.height / 2,
+                                     width: size.width,
+                                     height: size.height)
+        
+        controlButton.addTarget(self, action: #selector(buttonActions(_:)), for: .touchUpInside)
+        controlButton.tintColor = .white
+        
+        let rewindButton = UIButton(type: .system)
+        rewindButton.frame = controlButton.frame
+        rewindButton.frame.origin.x -= 120
+        rewindButton.setImage(icons?.rewind, for: .normal)
+        rewindButton.tintColor = .white
+        rewindButton.addTarget(self, action: #selector(rewindPlayer(_:)), for: .touchUpInside)
+        
+        let fastForwardButton = UIButton(type: .system)
+        fastForwardButton.frame = controlButton.frame
+        fastForwardButton.frame.origin.x += 120
+        fastForwardButton.setImage(icons?.fastForward, for: .normal)
+        fastForwardButton.tintColor = .white
+        fastForwardButton.addTarget(self, action: #selector(fastForwardPlayer(_:)), for: .touchUpInside)
+
+        containerView.addSubview(controlButton)
+        containerView.addSubview(rewindButton)
+        containerView.addSubview(fastForwardButton)
+    }
+    
+    public func setVideoSlider(thumbnailImage: UIImage?, tintColor: UIColor, font: UIFont, fullScreen: (image: UIImage?, target: Any?, action: Selector)) {
+        let sideMargin: CGFloat = 30
+        videoSlider = UISlider()
+        videoSlider.frame = CGRect(x: sideMargin, y:
+            containerView.frame.height * 0.87,
+                                   width: containerView.frame.width - sideMargin * 2,
+                                   height: 30)
+        videoSlider.addTarget(self, action: #selector(didChangeVideoSliderValue(_:)), for: .valueChanged)
+        videoSlider.setThumbImage(thumbnailImage, for: .normal)
+        videoSlider.tintColor = tintColor
+        
+        containerView.addSubview(videoSlider)
+        
+        videoSlider.value = 0
+        videoSlider.minimumValue = 0
+        
+        let sliderHeight = videoSlider.frame.height
+        startTimeLabel.frame = CGRect(x: videoSlider.frame.origin.x - 14,
+                                      y: videoSlider.frame.origin.y + sliderHeight + 5,
+                                      width: 50,
+                                      height: 30)
+        startTimeLabel.text = "00:00"
+        startTimeLabel.textColor = .white
+        startTimeLabel.font = font
+        startTimeLabel.sizeToFit()
+        
+        let lineView = UIView()
+        lineView.frame = CGRect(x: startTimeLabel.frame.origin.x + startTimeLabel.frame.width + 5,
+                                y: startTimeLabel.frame.origin.y - 1,
+                                width: 1,
+                                height: startTimeLabel.frame.height + 2)
+        lineView.backgroundColor = .white
+        
+        endTimeLabel.frame = startTimeLabel.frame
+        endTimeLabel.frame.origin.x = lineView.frame.origin.x + 6
+        endTimeLabel.textColor = .white
+        endTimeLabel.font = font
+        
+        let fullScreenButton = UIButton(type: .system)
+        let fullScreenLength: CGFloat = 30
+        fullScreenButton.frame = CGRect(x: videoSlider.frame.origin.x + videoSlider.frame.width - fullScreenLength / 2,
+                                        y: lineView.frame.origin.y - 2.5,
+                                        width: fullScreenLength,
+                                        height: fullScreenLength)
+        fullScreenButton.setImage(fullScreen.image, for: .normal)
+        fullScreenButton.tintColor = .white
+        fullScreenButton.addTarget(fullScreen.target, action: fullScreen.action, for: .touchUpInside)
+        
+        containerView.addSubview(startTimeLabel)
+        containerView.addSubview(lineView)
+        containerView.addSubview(endTimeLabel)
+        containerView.addSubview(fullScreenButton)
+    }
+    
+    @objc private func didChangeVideoSliderValue(_ sender: UISlider) {
+        pause()
+        let seekingTime = CMTime(value: CMTimeValue(sender.value), timescale: 1)
+        seek(to: seekingTime, completionHandler: { bool in
+            if bool {
+                self.play()
+            }
+        })
+    }
+    
+    @objc private func buttonActions(_ sender: UIButton) {
+        switch playbackState {
+        case .failed:
+            sender.setImage(icons?.pause, for: .normal)
+            pause()
+        case .stopped:
+            sender.setImage(icons?.play, for: .normal)
+            playFromBeginning()
+        case .paused:
+            sender.setImage(icons?.play, for: .normal)
+            playFromCurrentTime()
+        case .playing:
+            sender.setImage(icons?.pause, for: .normal)
+            pause()
+        }
+    }
+    
+    @objc private func rewindPlayer(_ sender: UIButton) {
+        let rewindTime = currentTime - 10
+        let time = CMTime(value: CMTimeValue(rewindTime), timescale: 1)
+        seek(to: time)
+    }
+    
+    @objc private func fastForwardPlayer(_ sender: UIButton) {
+        let fastForwardTime = currentTime + 10
+        let time = CMTime(value: CMTimeValue(fastForwardTime), timescale: 1)
+        seek(to: time)
     }
 
     fileprivate func setupPlayerItem(_ playerItem: AVPlayerItem?) {
@@ -754,10 +909,13 @@ extension Player {
             let timeRanges = object.loadedTimeRanges
             if let timeRange = timeRanges.first?.timeRangeValue {
                 let bufferedTime = CMTimeGetSeconds(CMTimeAdd(timeRange.start, timeRange.duration))
+                
                 if strongSelf._lastBufferTime != bufferedTime {
                     strongSelf._lastBufferTime = bufferedTime
                     strongSelf.executeClosureOnMainQueueIfNecessary {
                         strongSelf.playerDelegate?.playerBufferTimeDidChange(bufferedTime)
+                        
+                        strongSelf.videoSlider.value = Float(bufferedTime)
                     }
                 }
             }
